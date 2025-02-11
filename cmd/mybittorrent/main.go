@@ -6,36 +6,53 @@ import (
 	"os"
 	"strconv"
 	"unicode"
-	// bencode "github.com/jackpal/bencode-go" // Available if you need it!
 )
 
 // Ensures gofmt doesn't remove the "os" encoding/json import (feel free to remove this!)
 var _ = json.Marshal
 
+func decodeBencodeString(s string) (string, error) {
+	var firstColonIndex int
+
+	for i := 0; i < len(s); i++ {
+		if s[i] == ':' {
+			firstColonIndex = i
+			break
+		}
+	}
+
+	lengthStr := s[:firstColonIndex]
+
+	length, err := strconv.Atoi(lengthStr)
+	if err != nil {
+		return "", err
+	}
+
+	return s[firstColonIndex+1 : firstColonIndex+1+length], nil
+}
+
+func decodeBencodeInt(s string) (int, error) {
+	s = s[1 : len(s)-1]
+	return strconv.Atoi(s)
+}
+
 // Example:
 // - 5:hello -> hello
 // - 10:hello12345 -> hello12345
 func decodeBencode(bencodedString string) (interface{}, error) {
-	if unicode.IsDigit(rune(bencodedString[0])) {
-		var firstColonIndex int
-
-		for i := 0; i < len(bencodedString); i++ {
-			if bencodedString[i] == ':' {
-				firstColonIndex = i
-				break
-			}
+	ch := bencodedString[0]
+	switch ch {
+	case 'i':
+		return decodeBencodeInt(bencodedString)
+	case 'l':
+		return nil, fmt.Errorf("lists are not supported at the moment")
+	case 'd':
+		return nil, fmt.Errorf("dictionaries are not supported at the moment")
+	default:
+		if unicode.IsDigit(rune(ch)) {
+			return decodeBencodeString(bencodedString)
 		}
-
-		lengthStr := bencodedString[:firstColonIndex]
-
-		length, err := strconv.Atoi(lengthStr)
-		if err != nil {
-			return "", err
-		}
-
-		return bencodedString[firstColonIndex+1 : firstColonIndex+1+length], nil
-	} else {
-		return "", fmt.Errorf("only strings are supported at the moment")
+		return nil, fmt.Errorf("unknown bencoded value: %c", ch)
 	}
 }
 
