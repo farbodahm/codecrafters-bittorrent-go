@@ -44,7 +44,7 @@ func decodeBencodeInt(s string) (int, int, error) {
 
 func decodeBencodeList(s string) ([]interface{}, int, error) {
 	list := make([]interface{}, 0)
-	var totalSize int
+	totalSize := 2
 	s = s[1:]
 
 	for s[0] != 'e' {
@@ -71,14 +71,66 @@ func decodeBencodeList(s string) ([]interface{}, int, error) {
 				return nil, 0, err
 			}
 			list = append(list, item)
-			totalSize += l + 2
-			s = s[l+2:]
+			totalSize += l
+			s = s[l:]
 		} else {
 			return nil, 0, fmt.Errorf("unknown bencoded value: %c", s[0])
 		}
 	}
 
 	return list, totalSize, nil
+}
+
+func decodeBencodeDict(s string) (map[string]interface{}, int, error) {
+	dict := make(map[string]interface{})
+	totalSize := 2
+	s = s[1:]
+
+	for s[0] != 'e' {
+		key, l, err := decodeBencodeString(s)
+		if err != nil {
+			return nil, 0, err
+		}
+		s = s[l:]
+		totalSize += l
+
+		if s[0] == 'i' {
+			item, l, err := decodeBencodeInt(s)
+			if err != nil {
+				return nil, 0, err
+			}
+			dict[key] = item
+			s = s[l:]
+			totalSize += l
+		} else if unicode.IsDigit(rune(s[0])) {
+			item, l, err := decodeBencodeString(s)
+			if err != nil {
+				return nil, 0, err
+			}
+			dict[key] = item
+			s = s[l:]
+			totalSize += l
+		} else if s[0] == 'l' {
+			item, l, err := decodeBencodeList(s)
+			if err != nil {
+				return nil, 0, err
+			}
+			dict[key] = item
+			s = s[l:]
+			totalSize += l
+		} else if s[0] == 'd' {
+			item, l, err := decodeBencodeDict(s)
+			if err != nil {
+				return nil, 0, err
+			}
+			dict[key] = item
+			s = s[l:]
+		} else {
+			return nil, 0, fmt.Errorf("unknown bencoded value: %c", s[0])
+		}
+	}
+
+	return dict, totalSize, nil
 }
 
 // Example:
@@ -94,7 +146,9 @@ func decodeBencode(bencodedString string) (interface{}, error) {
 		i, _, err := decodeBencodeList(bencodedString)
 		return i, err
 	case 'd':
-		return nil, fmt.Errorf("dictionaries are not supported at the moment")
+		i, s, err := decodeBencodeDict(bencodedString)
+		log.Println(s)
+		return i, err
 	default:
 		if unicode.IsDigit(rune(ch)) {
 			s, i, err := decodeBencodeString(bencodedString)
