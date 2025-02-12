@@ -3,15 +3,14 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
+	"strings"
 	"unicode"
 )
 
-// Ensures gofmt doesn't remove the "os" encoding/json import (feel free to remove this!)
-var _ = json.Marshal
-
-func decodeBencodeString(s string) (string, error) {
+func decodeBencodeString(s string) (string, int, error) {
 	var firstColonIndex int
 
 	for i := 0; i < len(s); i++ {
@@ -25,15 +24,49 @@ func decodeBencodeString(s string) (string, error) {
 
 	length, err := strconv.Atoi(lengthStr)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 
-	return s[firstColonIndex+1 : firstColonIndex+1+length], nil
+	return s[firstColonIndex+1 : firstColonIndex+1+length], firstColonIndex + length + 1, nil
 }
 
-func decodeBencodeInt(s string) (int, error) {
+func decodeBencodeInt(s string) (int, int, error) {
+	endDelimiter := strings.Index(s, "e")
+	s = s[1:endDelimiter]
+	i, err := strconv.Atoi(s)
+
+	if err != nil {
+		return -1, 0, err
+	}
+
+	return i, endDelimiter + 1, nil
+}
+
+func decodeBencodeList(s string) ([]interface{}, error) {
+	var list []interface{}
 	s = s[1 : len(s)-1]
-	return strconv.Atoi(s)
+
+	for len(s) > 0 {
+		if s[0] == 'i' {
+			item, l, err := decodeBencodeInt(s)
+			if err != nil {
+				return nil, err
+			}
+			list = append(list, item)
+			s = s[l:]
+		} else if unicode.IsDigit(rune(s[0])) {
+			item, l, err := decodeBencodeString(s)
+			if err != nil {
+				return nil, err
+			}
+			list = append(list, item)
+			s = s[l:]
+		} else {
+			return nil, fmt.Errorf("unknown bencoded value: %c", s[0])
+		}
+	}
+
+	return list, nil
 }
 
 // Example:
@@ -43,14 +76,18 @@ func decodeBencode(bencodedString string) (interface{}, error) {
 	ch := bencodedString[0]
 	switch ch {
 	case 'i':
-		return decodeBencodeInt(bencodedString)
+		i, s, err := decodeBencodeInt(bencodedString)
+		log.Println(i, s)
+		return i, err
 	case 'l':
-		return nil, fmt.Errorf("lists are not supported at the moment")
+		return decodeBencodeList(bencodedString)
 	case 'd':
 		return nil, fmt.Errorf("dictionaries are not supported at the moment")
 	default:
 		if unicode.IsDigit(rune(ch)) {
-			return decodeBencodeString(bencodedString)
+			s, i, err := decodeBencodeString(bencodedString)
+			log.Println(s, i)
+			return s, err
 		}
 		return nil, fmt.Errorf("unknown bencoded value: %c", ch)
 	}
@@ -61,6 +98,9 @@ func main() {
 	fmt.Fprintln(os.Stderr, "Starting application...")
 
 	command := os.Args[1]
+
+	// l5:helloi52ee
+	// [“hello”,52]
 
 	if command == "decode" {
 		bencodedValue := os.Args[2]
