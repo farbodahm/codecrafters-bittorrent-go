@@ -42,31 +42,43 @@ func decodeBencodeInt(s string) (int, int, error) {
 	return i, endDelimiter + 1, nil
 }
 
-func decodeBencodeList(s string) ([]interface{}, error) {
+func decodeBencodeList(s string) ([]interface{}, int, error) {
 	list := make([]interface{}, 0)
-	s = s[1 : len(s)-1]
+	var totalSize int
+	s = s[1:]
 
-	for len(s) > 0 {
+	for s[0] != 'e' {
+
 		if s[0] == 'i' {
 			item, l, err := decodeBencodeInt(s)
 			if err != nil {
-				return nil, err
+				return nil, 0, err
 			}
 			list = append(list, item)
 			s = s[l:]
+			totalSize += l
 		} else if unicode.IsDigit(rune(s[0])) {
 			item, l, err := decodeBencodeString(s)
 			if err != nil {
-				return nil, err
+				return nil, 0, err
 			}
 			list = append(list, item)
 			s = s[l:]
+			totalSize += l
+		} else if s[0] == 'l' {
+			item, l, err := decodeBencodeList(s)
+			if err != nil {
+				return nil, 0, err
+			}
+			list = append(list, item)
+			totalSize += l + 2
+			s = s[l+2:]
 		} else {
-			return nil, fmt.Errorf("unknown bencoded value: %c", s[0])
+			return nil, 0, fmt.Errorf("unknown bencoded value: %c", s[0])
 		}
 	}
 
-	return list, nil
+	return list, totalSize, nil
 }
 
 // Example:
@@ -76,11 +88,11 @@ func decodeBencode(bencodedString string) (interface{}, error) {
 	ch := bencodedString[0]
 	switch ch {
 	case 'i':
-		i, s, err := decodeBencodeInt(bencodedString)
-		log.Println(i, s)
+		i, _, err := decodeBencodeInt(bencodedString)
 		return i, err
 	case 'l':
-		return decodeBencodeList(bencodedString)
+		i, _, err := decodeBencodeList(bencodedString)
+		return i, err
 	case 'd':
 		return nil, fmt.Errorf("dictionaries are not supported at the moment")
 	default:
