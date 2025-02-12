@@ -43,7 +43,7 @@ func decodeBencodeInt(s string) (int, int, error) {
 }
 
 func decodeBencodeList(s string) ([]interface{}, error) {
-	var list []interface{}
+	list := make([]interface{}, 0)
 	s = s[1 : len(s)-1]
 
 	for len(s) > 0 {
