@@ -159,14 +159,38 @@ func decodeBencode(bencodedString string) (interface{}, error) {
 	}
 }
 
+// MetaInfo holds all metadata related information for the given torrent.
+type MetaInfo struct {
+	TrackerUrl string
+	Length     int
+}
+
+// ParseTorrentFile parses a torrent file to a MetaInfo object.
+func ParseTorrentFile(filePath string) (MetaInfo, error) {
+	file, err := os.ReadFile(filePath)
+	if err != nil {
+		return MetaInfo{}, err
+	}
+
+	decodedTorrent, _, err := decodeBencodeDict(string(file))
+	if err != nil {
+		return MetaInfo{}, err
+	}
+	info := decodedTorrent["info"].(map[string]interface{})
+
+	result := MetaInfo{
+		TrackerUrl: decodedTorrent["announce"].(string),
+		Length:     info["length"].(int),
+	}
+
+	return result, nil
+}
+
 func main() {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	fmt.Fprintln(os.Stderr, "Starting application...")
 
 	command := os.Args[1]
-
-	// l5:helloi52ee
-	// [“hello”,52]
 
 	if command == "decode" {
 		bencodedValue := os.Args[2]
@@ -179,6 +203,16 @@ func main() {
 
 		jsonOutput, _ := json.Marshal(decoded)
 		fmt.Println(string(jsonOutput))
+	} else if command == "info" {
+		torrentFilePath := os.Args[2]
+
+		metaInfo, err := ParseTorrentFile(torrentFilePath)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		fmt.Println("Tracker URL:", metaInfo.TrackerUrl)
+		fmt.Println("Length:", metaInfo.Length)
 	} else {
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)
