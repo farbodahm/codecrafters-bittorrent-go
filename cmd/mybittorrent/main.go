@@ -8,9 +8,11 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	. "github.com/codecrafters-io/bittorrent-starter-go/app"
 )
 
-func decodeBencodeString(s string) (string, int, error) {
+func decodeBencodeString(s string) (BNode, int, error) {
 	var firstColonIndex int
 
 	for i := 0; i < len(s); i++ {
@@ -24,26 +26,28 @@ func decodeBencodeString(s string) (string, int, error) {
 
 	length, err := strconv.Atoi(lengthStr)
 	if err != nil {
-		return "", 0, err
+		return BNode{}, 0, err
 	}
 
-	return s[firstColonIndex+1 : firstColonIndex+1+length], firstColonIndex + length + 1, nil
+	r := BNode{Type: BString, Str: s[firstColonIndex+1 : firstColonIndex+1+length]}
+
+	return r, firstColonIndex + length + 1, nil
 }
 
-func decodeBencodeInt(s string) (int, int, error) {
+func decodeBencodeInt(s string) (BNode, int, error) {
 	endDelimiter := strings.Index(s, "e")
 	s = s[1:endDelimiter]
 	i, err := strconv.Atoi(s)
 
 	if err != nil {
-		return -1, 0, err
+		return BNode{}, 0, err
 	}
 
-	return i, endDelimiter + 1, nil
+	return BNode{Type: BInt, Int: i}, endDelimiter + 1, nil
 }
 
-func decodeBencodeList(s string) ([]interface{}, int, error) {
-	list := make([]interface{}, 0)
+func decodeBencodeList(s string) (BNode, int, error) {
+	r := BNode{Type: BList, List: make([]*BNode, 0)}
 	totalSize := 2
 	s = s[1:]
 
@@ -52,44 +56,44 @@ func decodeBencodeList(s string) ([]interface{}, int, error) {
 		if s[0] == 'i' {
 			item, l, err := decodeBencodeInt(s)
 			if err != nil {
-				return nil, 0, err
+				return r, 0, err
 			}
-			list = append(list, item)
+			r.List = append(r.List, &item)
 			s = s[l:]
 			totalSize += l
 		} else if unicode.IsDigit(rune(s[0])) {
 			item, l, err := decodeBencodeString(s)
 			if err != nil {
-				return nil, 0, err
+				return r, 0, err
 			}
-			list = append(list, item)
+			r.List = append(r.List, &item)
 			s = s[l:]
 			totalSize += l
 		} else if s[0] == 'l' {
 			item, l, err := decodeBencodeList(s)
 			if err != nil {
-				return nil, 0, err
+				return r, 0, err
 			}
-			list = append(list, item)
+			r.List = append(r.List, &item)
 			totalSize += l
 			s = s[l:]
 		} else {
-			return nil, 0, fmt.Errorf("unknown bencoded value: %c", s[0])
+			return r, 0, fmt.Errorf("unknown bencoded value: %c", s[0])
 		}
 	}
 
-	return list, totalSize, nil
+	return r, totalSize, nil
 }
 
-func decodeBencodeDict(s string) (map[string]interface{}, int, error) {
-	dict := make(map[string]interface{})
+func decodeBencodeDict(s string) (BNode, int, error) {
+	r := BNode{Type: BDict, Dict: make(map[string]*BNode)}
 	totalSize := 2
 	s = s[1:]
 
 	for s[0] != 'e' {
 		key, l, err := decodeBencodeString(s)
 		if err != nil {
-			return nil, 0, err
+			return r, 0, err
 		}
 		s = s[l:]
 		totalSize += l
@@ -97,46 +101,46 @@ func decodeBencodeDict(s string) (map[string]interface{}, int, error) {
 		if s[0] == 'i' {
 			item, l, err := decodeBencodeInt(s)
 			if err != nil {
-				return nil, 0, err
+				return r, 0, err
 			}
-			dict[key] = item
+			r.Dict[key.Str] = &item
 			s = s[l:]
 			totalSize += l
 		} else if unicode.IsDigit(rune(s[0])) {
 			item, l, err := decodeBencodeString(s)
 			if err != nil {
-				return nil, 0, err
+				return r, 0, err
 			}
-			dict[key] = item
+			r.Dict[key.Str] = &item
 			s = s[l:]
 			totalSize += l
 		} else if s[0] == 'l' {
 			item, l, err := decodeBencodeList(s)
 			if err != nil {
-				return nil, 0, err
+				return r, 0, err
 			}
-			dict[key] = item
+			r.Dict[key.Str] = &item
 			s = s[l:]
 			totalSize += l
 		} else if s[0] == 'd' {
 			item, l, err := decodeBencodeDict(s)
 			if err != nil {
-				return nil, 0, err
+				return r, 0, err
 			}
-			dict[key] = item
+			r.Dict[key.Str] = &item
 			s = s[l:]
 		} else {
-			return nil, 0, fmt.Errorf("unknown bencoded value: %c", s[0])
+			return r, 0, fmt.Errorf("unknown bencoded value: %c", s[0])
 		}
 	}
 
-	return dict, totalSize, nil
+	return r, totalSize, nil
 }
 
 // Example:
 // - 5:hello -> hello
 // - 10:hello12345 -> hello12345
-func decodeBencode(bencodedString string) (interface{}, error) {
+func decodeBencode(bencodedString string) (BNode, error) {
 	ch := bencodedString[0]
 	switch ch {
 	case 'i':
@@ -155,7 +159,7 @@ func decodeBencode(bencodedString string) (interface{}, error) {
 			log.Println(s, i)
 			return s, err
 		}
-		return nil, fmt.Errorf("unknown bencoded value: %c", ch)
+		return BNode{}, fmt.Errorf("unknown bencoded value: %c", ch)
 	}
 }
 
@@ -176,14 +180,54 @@ func ParseTorrentFile(filePath string) (MetaInfo, error) {
 	if err != nil {
 		return MetaInfo{}, err
 	}
-	info := decodedTorrent["info"].(map[string]interface{})
+	info := decodedTorrent.Dict["info"]
 
 	result := MetaInfo{
-		TrackerUrl: decodedTorrent["announce"].(string),
-		Length:     info["length"].(int),
+		TrackerUrl: decodedTorrent.Dict["announce"].Str,
+		Length:     info.Dict["length"].Int,
 	}
 
 	return result, nil
+}
+
+// MarshalBNode encodes a BNode into JSON format.
+func MarshalBNode(node *BNode) ([]byte, error) {
+	var b []byte
+	var err error
+
+	switch node.Type {
+	case BString:
+		b, err = json.Marshal(node.Str)
+
+	case BInt:
+		b, err = json.Marshal(node.Int)
+
+	case BList:
+		// Convert list elements to JSON
+		var encodedList []json.RawMessage
+		for _, item := range node.List {
+			encodedItem, err := MarshalBNode(item)
+			if err != nil {
+				return nil, err
+			}
+			encodedList = append(encodedList, encodedItem)
+		}
+		b, err = json.Marshal(encodedList)
+
+	case BDict:
+		// Convert dictionary values to JSON
+		encodedDict := make(map[string]json.RawMessage)
+		for key, value := range node.Dict {
+			encodedItem, err := MarshalBNode(value)
+			if err != nil {
+				return nil, err
+			}
+			encodedDict[key] = encodedItem
+		}
+		b, err = json.Marshal(encodedDict)
+	}
+
+	return b, err
 }
 
 func main() {
@@ -201,7 +245,11 @@ func main() {
 			return
 		}
 
-		jsonOutput, _ := json.Marshal(decoded)
+		jsonOutput, err := MarshalBNode(&decoded)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
 		fmt.Println(string(jsonOutput))
 	} else if command == "info" {
 		torrentFilePath := os.Args[2]
