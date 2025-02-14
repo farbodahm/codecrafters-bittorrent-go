@@ -204,7 +204,7 @@ func MarshalBNode(node *BNode) ([]byte, error) {
 
 	case BList:
 		// Convert list elements to JSON
-		var encodedList []json.RawMessage
+		encodedList := make([]json.RawMessage, 0)
 		for _, item := range node.List {
 			encodedItem, err := MarshalBNode(item)
 			if err != nil {
