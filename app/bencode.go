@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -244,12 +245,22 @@ func EncodeBencodeList(node BNode) []byte {
 // EncodeBencodeDict encodes a dictionary of BNodes into bencode format.
 func EncodeBencodeDict(node BNode) []byte {
 	encodedDict := []byte("d")
-	for key, value := range node.Dict {
+
+	// Extract and sort keys lexicographically
+	keys := make([]string, 0, len(node.Dict))
+	for key := range node.Dict {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	// Encode each key-value pair in sorted order
+	for _, key := range keys {
 		encodedKey := EncodeBencodeString(key)
-		encodedValue := EncodeBNode(*value)
+		encodedValue := EncodeBNode(*node.Dict[key])
 		encodedDict = append(encodedDict, encodedKey...)
 		encodedDict = append(encodedDict, encodedValue...)
 	}
+
 	encodedDict = append(encodedDict, 'e')
 	return encodedDict
 }
