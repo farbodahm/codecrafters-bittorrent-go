@@ -201,3 +201,55 @@ func MarshalBNode(node *BNode) ([]byte, error) {
 
 	return b, err
 }
+
+// EncodeBNode encodes a BNode into a bencode-encoded byte slice based on its type.
+func EncodeBNode(node BNode) []byte {
+	switch node.Type {
+	case BString:
+		return EncodeBencodeString(node.Str)
+	case BInt:
+		return EncodeBencodeInt(node.Int)
+	case BList:
+		return EncodeBencodeList(node)
+	case BDict:
+		return EncodeBencodeDict(node)
+	default:
+		log.Fatalf("Unknown node type: %d", node.Type)
+	}
+	return nil
+}
+
+// EncodeBencodeString encodes a string into bencode format.
+func EncodeBencodeString(s string) []byte {
+	// TODO: Check if we have to store as []byte instead of string in the BNode
+	return []byte(fmt.Sprintf("%d:%s", len(s), s))
+}
+
+// EncodeBencodeInt encodes an integer into bencode format.
+func EncodeBencodeInt(i int) []byte {
+	return []byte(fmt.Sprintf("i%de", i))
+}
+
+// EncodeBencodeList encodes a list of BNodes into bencode format.
+func EncodeBencodeList(node BNode) []byte {
+	encodedList := []byte("l")
+	for _, item := range node.List {
+		encodedItem := EncodeBNode(*item)
+		encodedList = append(encodedList, encodedItem...)
+	}
+	encodedList = append(encodedList, 'e')
+	return encodedList
+}
+
+// EncodeBencodeDict encodes a dictionary of BNodes into bencode format.
+func EncodeBencodeDict(node BNode) []byte {
+	encodedDict := []byte("d")
+	for key, value := range node.Dict {
+		encodedKey := EncodeBencodeString(key)
+		encodedValue := EncodeBNode(*value)
+		encodedDict = append(encodedDict, encodedKey...)
+		encodedDict = append(encodedDict, encodedValue...)
+	}
+	encodedDict = append(encodedDict, 'e')
+	return encodedDict
+}

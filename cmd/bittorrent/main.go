@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha1"
 	"fmt"
 	"log"
 	"os"
@@ -10,8 +11,19 @@ import (
 
 // MetaInfo holds all metadata related information for the given torrent.
 type MetaInfo struct {
-	TrackerUrl string
-	Length     int
+	TrackerUrl  string
+	Length      int
+	InfoHashHex string
+}
+
+// CalculateInfoHash calculates the SHA1 hash of the Bencoded value of `info` dictionary from torrent file.
+func CalculateInfoHash(infoDict BNode) string {
+	encodedInfo := EncodeBNode(infoDict)
+	h := sha1.New()
+	h.Write([]byte(encodedInfo))
+	encodedInfo = h.Sum(nil)
+
+	return fmt.Sprintf("%x", encodedInfo)
 }
 
 // ParseTorrentFile parses a torrent file to a MetaInfo object.
@@ -28,8 +40,9 @@ func ParseTorrentFile(filePath string) (MetaInfo, error) {
 	info := decodedTorrent.Dict["info"]
 
 	result := MetaInfo{
-		TrackerUrl: decodedTorrent.Dict["announce"].Str,
-		Length:     info.Dict["length"].Int,
+		TrackerUrl:  decodedTorrent.Dict["announce"].Str,
+		Length:      info.Dict["length"].Int,
+		InfoHashHex: CalculateInfoHash(*info),
 	}
 
 	return result, nil
@@ -68,6 +81,7 @@ func main() {
 		// Print torrent file info
 		fmt.Println("Tracker URL:", metaInfo.TrackerUrl)
 		fmt.Println("Length:", metaInfo.Length)
+		fmt.Println("Info Hash:", metaInfo.InfoHashHex)
 
 	default:
 		// Handle unknown commands
