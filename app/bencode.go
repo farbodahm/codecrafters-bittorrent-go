@@ -1,18 +1,16 @@
-package main
+package app
 
 import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 	"strconv"
 	"strings"
 	"unicode"
-
-	. "github.com/codecrafters-io/bittorrent-starter-go/app"
 )
 
-func decodeBencodeString(s string) (BNode, int, error) {
+// DecodeBencodeString decodes a bencoded string and returns a BNode, parsed length, and an error if any.
+func DecodeBencodeString(s string) (BNode, int, error) {
 	var firstColonIndex int
 
 	for i := 0; i < len(s); i++ {
@@ -34,7 +32,8 @@ func decodeBencodeString(s string) (BNode, int, error) {
 	return r, firstColonIndex + length + 1, nil
 }
 
-func decodeBencodeInt(s string) (BNode, int, error) {
+// DecodeBencodeInt decodes a bencoded integer and returns a BNode, parsed length, and an error if any.
+func DecodeBencodeInt(s string) (BNode, int, error) {
 	endDelimiter := strings.Index(s, "e")
 	s = s[1:endDelimiter]
 	i, err := strconv.Atoi(s)
@@ -46,7 +45,8 @@ func decodeBencodeInt(s string) (BNode, int, error) {
 	return BNode{Type: BInt, Int: i}, endDelimiter + 1, nil
 }
 
-func decodeBencodeList(s string) (BNode, int, error) {
+// DecodeBencodeList decodes a bencoded list and returns a BNode, parsed length, and an error if any.
+func DecodeBencodeList(s string) (BNode, int, error) {
 	r := BNode{Type: BList, List: make([]*BNode, 0)}
 	totalSize := 2
 	s = s[1:]
@@ -54,7 +54,7 @@ func decodeBencodeList(s string) (BNode, int, error) {
 	for s[0] != 'e' {
 
 		if s[0] == 'i' {
-			item, l, err := decodeBencodeInt(s)
+			item, l, err := DecodeBencodeInt(s)
 			if err != nil {
 				return r, 0, err
 			}
@@ -62,7 +62,7 @@ func decodeBencodeList(s string) (BNode, int, error) {
 			s = s[l:]
 			totalSize += l
 		} else if unicode.IsDigit(rune(s[0])) {
-			item, l, err := decodeBencodeString(s)
+			item, l, err := DecodeBencodeString(s)
 			if err != nil {
 				return r, 0, err
 			}
@@ -70,7 +70,7 @@ func decodeBencodeList(s string) (BNode, int, error) {
 			s = s[l:]
 			totalSize += l
 		} else if s[0] == 'l' {
-			item, l, err := decodeBencodeList(s)
+			item, l, err := DecodeBencodeList(s)
 			if err != nil {
 				return r, 0, err
 			}
@@ -85,13 +85,14 @@ func decodeBencodeList(s string) (BNode, int, error) {
 	return r, totalSize, nil
 }
 
-func decodeBencodeDict(s string) (BNode, int, error) {
+// DecodeBencodeDict decodes a bencoded dictionary and returns a BNode, parsed length, and an error if any.
+func DecodeBencodeDict(s string) (BNode, int, error) {
 	r := BNode{Type: BDict, Dict: make(map[string]*BNode)}
 	totalSize := 2
 	s = s[1:]
 
 	for s[0] != 'e' {
-		key, l, err := decodeBencodeString(s)
+		key, l, err := DecodeBencodeString(s)
 		if err != nil {
 			return r, 0, err
 		}
@@ -99,7 +100,7 @@ func decodeBencodeDict(s string) (BNode, int, error) {
 		totalSize += l
 
 		if s[0] == 'i' {
-			item, l, err := decodeBencodeInt(s)
+			item, l, err := DecodeBencodeInt(s)
 			if err != nil {
 				return r, 0, err
 			}
@@ -107,7 +108,7 @@ func decodeBencodeDict(s string) (BNode, int, error) {
 			s = s[l:]
 			totalSize += l
 		} else if unicode.IsDigit(rune(s[0])) {
-			item, l, err := decodeBencodeString(s)
+			item, l, err := DecodeBencodeString(s)
 			if err != nil {
 				return r, 0, err
 			}
@@ -115,7 +116,7 @@ func decodeBencodeDict(s string) (BNode, int, error) {
 			s = s[l:]
 			totalSize += l
 		} else if s[0] == 'l' {
-			item, l, err := decodeBencodeList(s)
+			item, l, err := DecodeBencodeList(s)
 			if err != nil {
 				return r, 0, err
 			}
@@ -123,7 +124,7 @@ func decodeBencodeDict(s string) (BNode, int, error) {
 			s = s[l:]
 			totalSize += l
 		} else if s[0] == 'd' {
-			item, l, err := decodeBencodeDict(s)
+			item, l, err := DecodeBencodeDict(s)
 			if err != nil {
 				return r, 0, err
 			}
@@ -137,57 +138,28 @@ func decodeBencodeDict(s string) (BNode, int, error) {
 	return r, totalSize, nil
 }
 
-// Example:
-// - 5:hello -> hello
-// - 10:hello12345 -> hello12345
-func decodeBencode(bencodedString string) (BNode, error) {
+// DecodeBencode decodes a complete bencoded string and returns a BNode and an error if any.
+func DecodeBencode(bencodedString string) (BNode, error) {
 	ch := bencodedString[0]
 	switch ch {
 	case 'i':
-		i, _, err := decodeBencodeInt(bencodedString)
+		i, _, err := DecodeBencodeInt(bencodedString)
 		return i, err
 	case 'l':
-		i, _, err := decodeBencodeList(bencodedString)
+		i, _, err := DecodeBencodeList(bencodedString)
 		return i, err
 	case 'd':
-		i, s, err := decodeBencodeDict(bencodedString)
+		i, s, err := DecodeBencodeDict(bencodedString)
 		log.Println(s)
 		return i, err
 	default:
 		if unicode.IsDigit(rune(ch)) {
-			s, i, err := decodeBencodeString(bencodedString)
+			s, i, err := DecodeBencodeString(bencodedString)
 			log.Println(s, i)
 			return s, err
 		}
 		return BNode{}, fmt.Errorf("unknown bencoded value: %c", ch)
 	}
-}
-
-// MetaInfo holds all metadata related information for the given torrent.
-type MetaInfo struct {
-	TrackerUrl string
-	Length     int
-}
-
-// ParseTorrentFile parses a torrent file to a MetaInfo object.
-func ParseTorrentFile(filePath string) (MetaInfo, error) {
-	file, err := os.ReadFile(filePath)
-	if err != nil {
-		return MetaInfo{}, err
-	}
-
-	decodedTorrent, _, err := decodeBencodeDict(string(file))
-	if err != nil {
-		return MetaInfo{}, err
-	}
-	info := decodedTorrent.Dict["info"]
-
-	result := MetaInfo{
-		TrackerUrl: decodedTorrent.Dict["announce"].Str,
-		Length:     info.Dict["length"].Int,
-	}
-
-	return result, nil
 }
 
 // MarshalBNode encodes a BNode into JSON format.
@@ -228,41 +200,4 @@ func MarshalBNode(node *BNode) ([]byte, error) {
 	}
 
 	return b, err
-}
-
-func main() {
-	// You can use print statements as follows for debugging, they'll be visible when running tests.
-	fmt.Fprintln(os.Stderr, "Starting application...")
-
-	command := os.Args[1]
-
-	if command == "decode" {
-		bencodedValue := os.Args[2]
-
-		decoded, err := decodeBencode(bencodedValue)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-
-		jsonOutput, err := MarshalBNode(&decoded)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		fmt.Println(string(jsonOutput))
-	} else if command == "info" {
-		torrentFilePath := os.Args[2]
-
-		metaInfo, err := ParseTorrentFile(torrentFilePath)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		fmt.Println("Tracker URL:", metaInfo.TrackerUrl)
-		fmt.Println("Length:", metaInfo.Length)
-	} else {
-		fmt.Println("Unknown command: " + command)
-		os.Exit(1)
-	}
 }
