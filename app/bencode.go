@@ -150,13 +150,11 @@ func DecodeBencode(bencodedString string) (BNode, error) {
 		i, _, err := DecodeBencodeList(bencodedString)
 		return i, err
 	case 'd':
-		i, s, err := DecodeBencodeDict(bencodedString)
-		log.Println(s)
+		i, _, err := DecodeBencodeDict(bencodedString)
 		return i, err
 	default:
 		if unicode.IsDigit(rune(ch)) {
-			s, i, err := DecodeBencodeString(bencodedString)
-			log.Println(s, i)
+			s, _, err := DecodeBencodeString(bencodedString)
 			return s, err
 		}
 		return BNode{}, fmt.Errorf("unknown bencoded value: %c", ch)
