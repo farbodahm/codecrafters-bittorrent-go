@@ -14,6 +14,8 @@ type MetaInfo struct {
 	TrackerUrl  string
 	Length      int
 	InfoHashHex string
+	PieceLength int
+	Pieces      []string
 }
 
 // CalculateInfoHash calculates the SHA1 hash of the Bencoded value of `info` dictionary from torrent file.
@@ -39,10 +41,19 @@ func ParseTorrentFile(filePath string) (MetaInfo, error) {
 	}
 	info := decodedTorrent.Dict["info"]
 
+	// Separate each piece, Each piece is 20 bytes long
+	piecesStr := info.Dict["pieces"].Str
+	pieces := make([]string, 0)
+	for i := 0; i < len(piecesStr); i += 20 {
+		pieces = append(pieces, piecesStr[i:i+20])
+	}
+
 	result := MetaInfo{
 		TrackerUrl:  decodedTorrent.Dict["announce"].Str,
 		Length:      info.Dict["length"].Int,
 		InfoHashHex: CalculateInfoHash(*info),
+		PieceLength: info.Dict["piece length"].Int,
+		Pieces:      pieces,
 	}
 
 	return result, nil
@@ -82,6 +93,11 @@ func main() {
 		fmt.Println("Tracker URL:", metaInfo.TrackerUrl)
 		fmt.Println("Length:", metaInfo.Length)
 		fmt.Println("Info Hash:", metaInfo.InfoHashHex)
+		fmt.Println("Piece Length:", metaInfo.PieceLength)
+		fmt.Println("Piece Hashes:")
+		for _, piece := range metaInfo.Pieces {
+			fmt.Printf("%x\n", piece)
+		}
 
 	default:
 		// Handle unknown commands
