@@ -62,12 +62,10 @@ func ParseTorrentFile(filePath string) (MetaInfo, error) {
 	return result, nil
 }
 
+// GetPeers returns list of all available peers asking from the tracker.
 func GetPeers(info MetaInfo) ([]string, error) {
 	params := url.Values{}
-	log.Println(len(info.InfoHash))
-	log.Println(info.InfoHash)
-	log.Println(string(info.InfoHash))
-	params.Add("info_hash", url.QueryEscape(string(info.InfoHash)))
+	params.Add("info_hash", string(info.InfoHash))
 	params.Add("peer_id", "XX9911AA22ZZAAFFII22") // TODO: Replace with a proper random generator
 	params.Add("port", "6881")
 	params.Add("uploaded", "0")
@@ -79,19 +77,19 @@ func GetPeers(info MetaInfo) ([]string, error) {
 
 	resp, err := http.Get(fullUrl)
 	if err != nil {
-		log.Fatalf("Failed to send request: %v", err)
+		return nil, fmt.Errorf("failed to send request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	// Read response body
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatalf("Failed to read response: %v", err)
+		return nil, fmt.Errorf("failed to read response body: %v", err)
 	}
 
 	decoded, err := DecodeBencode(string(body))
 	if err != nil {
-		log.Fatalf("Failed to decode response: %v", err)
+		return nil, fmt.Errorf("failed to decode response body: %v", err)
 	}
 
 	// Parse peers URL with ports; Each peer is 6 bytes, 4 bytes URL 2 bytes port
@@ -140,7 +138,7 @@ func main() {
 		// Print torrent file info
 		fmt.Println("Tracker URL:", metaInfo.TrackerUrl)
 		fmt.Println("Length:", metaInfo.Length)
-		fmt.Printf("Info Hash:%x\n", metaInfo.InfoHash)
+		fmt.Printf("Info Hash: %x\n", metaInfo.InfoHash)
 		fmt.Println("Piece Length:", metaInfo.PieceLength)
 		fmt.Println("Piece Hashes:")
 		for _, piece := range metaInfo.Pieces {
