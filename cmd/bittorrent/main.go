@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha1"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -66,7 +68,7 @@ func ParseTorrentFile(filePath string) (MetaInfo, error) {
 func GetPeers(info MetaInfo) ([]string, error) {
 	params := url.Values{}
 	params.Add("info_hash", string(info.InfoHash))
-	params.Add("peer_id", "XX9911AA22ZZAAFFII22") // TODO: Replace with a proper random generator
+	params.Add("peer_id", GenerateRandomID(20))
 	params.Add("port", "6881")
 	params.Add("uploaded", "0")
 	params.Add("downloaded", "0")
@@ -103,6 +105,43 @@ func GetPeers(info MetaInfo) ([]string, error) {
 	}
 
 	return peers, nil
+}
+
+// HandshakePeer establishes a TCP connection with a peer and performs the BitTorrent handshake.
+func HandshakePeer(addr string, info MetaInfo) ([]byte, error) {
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to peer: %v", err)
+	}
+	defer conn.Close()
+
+	// Write handshake message
+	var msg bytes.Buffer
+	msg.WriteByte(19)
+	msg.WriteString("BitTorrent protocol")
+	msg.Write([]byte{0, 0, 0, 0, 0, 0, 0, 0})
+	msg.Write(info.InfoHash)
+	msg.WriteString(GenerateRandomID(20))
+
+	_, err = conn.Write(msg.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("failed to send handshake message: %v", err)
+	}
+
+	// According to BitTorrent spec, we expect 68 bytes as handshake answer.
+	// https://www.bittorrent.org/beps/bep_0003.html#peer-protocol
+	resp := make([]byte, 68)
+	n, err := conn.Read(resp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read handshake response: %v", err)
+	}
+
+	if n != 68 || resp[0] != 19 {
+		return nil, fmt.Errorf("invalid handshake response")
+	}
+	peerID := resp[48:]
+
+	return peerID, nil
 }
 
 func main() {
@@ -159,6 +198,19 @@ func main() {
 		for _, peer := range peers {
 			fmt.Println(peer)
 		}
+
+	case "handshake":
+		torrentFilePath := os.Args[2]
+		metaInfo, err := ParseTorrentFile(torrentFilePath)
+		if err != nil {
+			log.Fatalf("Failed to parse torrent file: %v", err)
+		}
+
+		peerId, err := HandshakePeer(os.Args[3], metaInfo)
+		if err != nil {
+			log.Fatalf("Failed to handshake peer: %v", err)
+		}
+		fmt.Printf("Peer ID: %x\n", peerId)
 
 	default:
 		// Handle unknown commands
