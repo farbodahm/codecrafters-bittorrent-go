@@ -111,7 +111,17 @@ func GetPeers(info MetaInfo) ([]string, error) {
 	return peers, nil
 }
 
-// HandshakePeer performs the BitTorrent handshake and retyrns the peer ID.
+// readExactBytes reads exactly 'size' bytes from the connection.
+func readExactBytes(conn net.Conn, size int) ([]byte, error) {
+	buf := make([]byte, size)
+	_, err := io.ReadFull(conn, buf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read %d bytes: %v", size, err)
+	}
+	return buf, nil
+}
+
+// HandshakePeer performs the BitTorrent handshake and returns the peer ID.
 func HandshakePeer(conn net.Conn, info MetaInfo) ([]byte, error) {
 	// Write handshake message
 	var msg bytes.Buffer
@@ -126,15 +136,13 @@ func HandshakePeer(conn net.Conn, info MetaInfo) ([]byte, error) {
 		return nil, fmt.Errorf("failed to send handshake message: %v", err)
 	}
 
-	// According to BitTorrent spec, we expect 68 bytes as handshake answer.
-	// https://www.bittorrent.org/beps/bep_0003.html#peer-protocol
-	resp := make([]byte, 68)
-	n, err := conn.Read(resp)
+	// Read handshake response (exactly 68 bytes)
+	resp, err := readExactBytes(conn, 68)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read handshake response: %v", err)
 	}
 
-	if n != 68 || resp[0] != 19 {
+	if resp[0] != 19 {
 		return nil, fmt.Errorf("invalid handshake response")
 	}
 	peerID := resp[48:]
@@ -149,33 +157,27 @@ type PeerMessage struct {
 	Payload []byte
 }
 
-// recuievePeerMessage reads a PeerMessage from a peer.
+// recievePeerMessage reads a PeerMessage from a peer.
 func recievePeerMessage(conn net.Conn) (PeerMessage, error) {
-	// Read message length
-	lengthBytes := make([]byte, 4)
-	_, err := conn.Read(lengthBytes)
+	// Read message length (4 bytes)
+	lengthBytes, err := readExactBytes(conn, 4)
 	if err != nil {
 		return PeerMessage{}, fmt.Errorf("failed to read message length: %v", err)
 	}
 	length := int(lengthBytes[0])<<24 | int(lengthBytes[1])<<16 | int(lengthBytes[2])<<8 | int(lengthBytes[3])
 
-	// Read message ID
-	idBytes := make([]byte, 1)
-	_, err = conn.Read(idBytes)
+	// Read message ID (1 byte)
+	idBytes, err := readExactBytes(conn, 1)
 	if err != nil {
 		return PeerMessage{}, fmt.Errorf("failed to read message ID: %v", err)
 	}
 	id := int(idBytes[0])
 
-	// Read message payload
-	payload := make([]byte, length-1)
-	n, err := conn.Read(payload)
+	// Read message payload (length - 1 bytes)
+	payload, err := readExactBytes(conn, length-1)
 	if err != nil {
 		return PeerMessage{}, fmt.Errorf("failed to read message payload: %v", err)
 	}
-
-	log.Println("-- Expected length:", length)
-	log.Println("-- Actual length:", n+1)
 
 	return PeerMessage{Length: length, ID: id, Payload: payload}, nil
 }
@@ -260,9 +262,6 @@ func recievePieceMessage(conn net.Conn) ([]byte, error) {
 		return nil, fmt.Errorf("failed to read piece message: %v", err)
 	}
 
-	log.Println("Received piece message:", msg.ID)
-	log.Println("Payload length:", len(msg.Payload))
-
 	if msg.ID != 7 {
 		return nil, fmt.Errorf("expected piece message 7, got: %d", msg.ID)
 	}
@@ -275,11 +274,6 @@ func recievePieceMessage(conn net.Conn) ([]byte, error) {
 func downloadPiece(conn net.Conn, index, totalPieceLen int) ([]byte, error) {
 	buffer := make([]byte, totalPieceLen)
 	for i := 0; i < totalPieceLen; i += PieceLength {
-		log.Println("Downloading block:", i)
-		log.Println("Total piece length:", totalPieceLen)
-		log.Println("Piece length:", PieceLength)
-		log.Println("Index:", index)
-		log.Println("Remaining:", totalPieceLen-i)
 		err := sendRequestMessage(conn, index, i, PieceLength)
 		if err != nil {
 			return nil, fmt.Errorf("failed to send request message: %v", err)
@@ -300,7 +294,6 @@ func downloadPiece(conn net.Conn, index, totalPieceLen int) ([]byte, error) {
 // It saves the downloaded piece into a file.
 // NOTE: DownloadPiece assumes handshake is already done.
 func DownloadPiece(conn net.Conn, index, totalPieceLen int, path string) error {
-	log.Println("Total piece length:", totalPieceLen)
 	_, err := readBitFieldMessage(conn)
 	if err != nil {
 		return fmt.Errorf("failed to read bitfield message: %v", err)
