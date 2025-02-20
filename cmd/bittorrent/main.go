@@ -10,9 +10,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 
 	. "github.com/codecrafters-io/bittorrent-starter-go/app"
 )
+
+// PieceLength is the length of each piece in bytes.
+const PieceLength = 16 * 1024
 
 // MetaInfo holds all metadata related information for the given torrent.
 type MetaInfo struct {
@@ -107,14 +111,8 @@ func GetPeers(info MetaInfo) ([]string, error) {
 	return peers, nil
 }
 
-// HandshakePeer establishes a TCP connection with a peer and performs the BitTorrent handshake.
-func HandshakePeer(addr string, info MetaInfo) ([]byte, error) {
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to peer: %v", err)
-	}
-	defer conn.Close()
-
+// HandshakePeer performs the BitTorrent handshake and retyrns the peer ID.
+func HandshakePeer(conn net.Conn, info MetaInfo) ([]byte, error) {
 	// Write handshake message
 	var msg bytes.Buffer
 	msg.WriteByte(19)
@@ -123,7 +121,7 @@ func HandshakePeer(addr string, info MetaInfo) ([]byte, error) {
 	msg.Write(info.InfoHash)
 	msg.WriteString(GenerateRandomID(20))
 
-	_, err = conn.Write(msg.Bytes())
+	_, err := conn.Write(msg.Bytes())
 	if err != nil {
 		return nil, fmt.Errorf("failed to send handshake message: %v", err)
 	}
@@ -142,6 +140,202 @@ func HandshakePeer(addr string, info MetaInfo) ([]byte, error) {
 	peerID := resp[48:]
 
 	return peerID, nil
+}
+
+// PeerMessage represents a message from/to a peer.
+type PeerMessage struct {
+	Length  int
+	ID      int
+	Payload []byte
+}
+
+// recuievePeerMessage reads a PeerMessage from a peer.
+func recievePeerMessage(conn net.Conn) (PeerMessage, error) {
+	// Read message length
+	lengthBytes := make([]byte, 4)
+	_, err := conn.Read(lengthBytes)
+	if err != nil {
+		return PeerMessage{}, fmt.Errorf("failed to read message length: %v", err)
+	}
+	length := int(lengthBytes[0])<<24 | int(lengthBytes[1])<<16 | int(lengthBytes[2])<<8 | int(lengthBytes[3])
+
+	// Read message ID
+	idBytes := make([]byte, 1)
+	_, err = conn.Read(idBytes)
+	if err != nil {
+		return PeerMessage{}, fmt.Errorf("failed to read message ID: %v", err)
+	}
+	id := int(idBytes[0])
+
+	// Read message payload
+	payload := make([]byte, length-1)
+	n, err := conn.Read(payload)
+	if err != nil {
+		return PeerMessage{}, fmt.Errorf("failed to read message payload: %v", err)
+	}
+
+	log.Println("-- Expected length:", length)
+	log.Println("-- Actual length:", n+1)
+
+	return PeerMessage{Length: length, ID: id, Payload: payload}, nil
+}
+
+// sendPeerMessage sends a PeerMessage to a peer.
+func sendPeerMessage(conn net.Conn, msg PeerMessage) error {
+	// Write message length
+	lengthBytes := []byte{byte(msg.Length >> 24), byte(msg.Length >> 16), byte(msg.Length >> 8), byte(msg.Length)}
+	_, err := conn.Write(lengthBytes)
+	if err != nil {
+		return fmt.Errorf("failed to write message length: %v", err)
+	}
+
+	// Write message ID
+	_, err = conn.Write([]byte{byte(msg.ID)})
+	if err != nil {
+		return fmt.Errorf("failed to write message ID: %v", err)
+	}
+
+	// Write message payload
+	_, err = conn.Write(msg.Payload)
+	if err != nil {
+		return fmt.Errorf("failed to write message payload: %v", err)
+	}
+
+	return nil
+}
+
+// readBitFieldMessage reads the bitfield message from a peer.
+func readBitFieldMessage(conn net.Conn) (PeerMessage, error) {
+	msg, err := recievePeerMessage(conn)
+	if err != nil {
+		return PeerMessage{}, fmt.Errorf("failed to read bitfield message: %v", err)
+	}
+
+	if msg.ID != 5 {
+		return PeerMessage{}, fmt.Errorf("expected bitfield message 5, got: %d", msg.ID)
+	}
+
+	return msg, nil
+}
+
+// sendInterestedMessage sends the interested message to a peer.
+func sendInterestedMessage(conn net.Conn) error {
+	msg := PeerMessage{Length: 1, ID: 2}
+	return sendPeerMessage(conn, msg)
+}
+
+// receiveUnchokeMessage reads the unchoke message from a peer.
+func receiveUnchokeMessage(conn net.Conn) (PeerMessage, error) {
+	msg, err := recievePeerMessage(conn)
+	if err != nil {
+		return PeerMessage{}, fmt.Errorf("failed to read unchoke message: %v", err)
+	}
+
+	if msg.ID != 1 {
+		return PeerMessage{}, fmt.Errorf("expected unchoke message 1, got: %d", msg.ID)
+	}
+
+	return msg, nil
+}
+
+// sendRequestMessage sends the request message to a peer.
+func sendRequestMessage(conn net.Conn, index, begin, length int) error {
+	msg := PeerMessage{
+		Length: 13,
+		ID:     6,
+		Payload: []byte{
+			byte(index >> 24), byte(index >> 16), byte(index >> 8), byte(index),
+			byte(begin >> 24), byte(begin >> 16), byte(begin >> 8), byte(begin),
+			byte(length >> 24), byte(length >> 16), byte(length >> 8), byte(length),
+		},
+	}
+
+	return sendPeerMessage(conn, msg)
+}
+
+// recievePieceMessage reads the piece message from a peer.
+func recievePieceMessage(conn net.Conn) ([]byte, error) {
+	msg, err := recievePeerMessage(conn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read piece message: %v", err)
+	}
+
+	log.Println("Received piece message:", msg.ID)
+	log.Println("Payload length:", len(msg.Payload))
+
+	if msg.ID != 7 {
+		return nil, fmt.Errorf("expected piece message 7, got: %d", msg.ID)
+	}
+
+	// return block data of the payload; first 8 bytes are index, begin and block data
+	return msg.Payload[8:], nil
+}
+
+// downloadPiece downloads a piece from a peer.
+func downloadPiece(conn net.Conn, index, totalPieceLen int) ([]byte, error) {
+	buffer := make([]byte, totalPieceLen)
+	for i := 0; i < totalPieceLen; i += PieceLength {
+		log.Println("Downloading block:", i)
+		log.Println("Total piece length:", totalPieceLen)
+		log.Println("Piece length:", PieceLength)
+		log.Println("Index:", index)
+		log.Println("Remaining:", totalPieceLen-i)
+		err := sendRequestMessage(conn, index, i, PieceLength)
+		if err != nil {
+			return nil, fmt.Errorf("failed to send request message: %v", err)
+		}
+
+		block, err := recievePieceMessage(conn)
+		if err != nil {
+			return nil, fmt.Errorf("failed to receive piece message: %v", err)
+		}
+
+		copy(buffer[i:], block)
+	}
+
+	return buffer, nil
+}
+
+// DownloadPiece downloads the piece from the peer after sending initial messages.
+// It saves the downloaded piece into a file.
+// NOTE: DownloadPiece assumes handshake is already done.
+func DownloadPiece(conn net.Conn, index, totalPieceLen int, path string) error {
+	log.Println("Total piece length:", totalPieceLen)
+	_, err := readBitFieldMessage(conn)
+	if err != nil {
+		return fmt.Errorf("failed to read bitfield message: %v", err)
+	}
+
+	err = sendInterestedMessage(conn)
+	if err != nil {
+		return fmt.Errorf("failed to send interested message: %v", err)
+	}
+
+	_, err = receiveUnchokeMessage(conn)
+	if err != nil {
+		return fmt.Errorf("failed to receive unchoke message: %v", err)
+	}
+
+	// Create a file to save the downloaded piece
+	file, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %v", err)
+	}
+	defer file.Close()
+
+	// Download the piece
+	piece, err := downloadPiece(conn, index, totalPieceLen)
+	if err != nil {
+		return fmt.Errorf("failed to download piece: %v", err)
+	}
+
+	// Write the downloaded piece to the file
+	_, err = file.Write(piece)
+	if err != nil {
+		return fmt.Errorf("failed to write piece to file: %v", err)
+	}
+
+	return nil
 }
 
 func main() {
@@ -206,11 +400,53 @@ func main() {
 			log.Fatalf("Failed to parse torrent file: %v", err)
 		}
 
-		peerId, err := HandshakePeer(os.Args[3], metaInfo)
+		conn, err := net.Dial("tcp", os.Args[3])
+		if err != nil {
+			log.Fatalf("Failed to connect to peer: %v", err)
+		}
+		defer conn.Close()
+
+		peerId, err := HandshakePeer(conn, metaInfo)
 		if err != nil {
 			log.Fatalf("Failed to handshake peer: %v", err)
 		}
 		fmt.Printf("Peer ID: %x\n", peerId)
+
+	case "download_piece":
+		torrentFilePath := os.Args[4]
+		resultFilePath := os.Args[3]
+
+		pieceIndex, err := strconv.Atoi(os.Args[5])
+		if err != nil {
+			log.Fatalf("Failed to parse piece index: %v", err)
+		}
+
+		metaInfo, err := ParseTorrentFile(torrentFilePath)
+		if err != nil {
+			log.Fatalf("Failed to parse torrent file: %v", err)
+		}
+
+		peers, err := GetPeers(metaInfo)
+		if err != nil {
+			log.Fatalf("Failed to get peers: %v", err)
+		}
+
+		conn, err := net.Dial("tcp", peers[0])
+		if err != nil {
+			log.Fatalf("Failed to connect to peer: %v", err)
+		}
+		defer conn.Close()
+
+		_, err = HandshakePeer(conn, metaInfo)
+		if err != nil {
+			log.Fatalf("Failed to handshake peer: %v", err)
+		}
+		log.Println("Handshake successful, downloading piece...")
+
+		err = DownloadPiece(conn, pieceIndex, metaInfo.PieceLength, resultFilePath)
+		if err != nil {
+			log.Fatalf("Failed to download piece: %v", err)
+		}
 
 	default:
 		// Handle unknown commands
