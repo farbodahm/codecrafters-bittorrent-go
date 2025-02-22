@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"time"
 
 	. "github.com/codecrafters-io/bittorrent-starter-go/app"
 )
@@ -271,10 +272,28 @@ func recievePieceMessage(conn net.Conn) ([]byte, error) {
 }
 
 // downloadPiece downloads a piece from a peer.
-func downloadPiece(conn net.Conn, index, totalPieceLen int) ([]byte, error) {
+func downloadPiece(conn net.Conn, index, pieceLength, totalFileSize int) ([]byte, error) {
+	// Check if this is the last piece
+	isLastPiece := (index+1)*pieceLength >= totalFileSize
+
+	// Determine actual piece size for this index
+	totalPieceLen := pieceLength // Default to full size
+	if isLastPiece {
+		totalPieceLen = totalFileSize - (index * pieceLength) // Calculate remaining bytes
+	}
+
+	log.Printf("Downloading piece %d - Total Piece Length: %d, Is Last Piece: %v\n", index, totalPieceLen, isLastPiece)
+
 	buffer := make([]byte, totalPieceLen)
+
 	for i := 0; i < totalPieceLen; i += PieceLength {
-		err := sendRequestMessage(conn, index, i, PieceLength)
+		// Determine block size dynamically
+		remainingSize := totalPieceLen - i
+		downloadLen := min(PieceLength, remainingSize)
+
+		log.Printf("Requesting block - Start: %d, Length: %d, Remaining: %d\n", i, downloadLen, remainingSize)
+
+		err := sendRequestMessage(conn, index, i, downloadLen)
 		if err != nil {
 			return nil, fmt.Errorf("failed to send request message: %v", err)
 		}
@@ -284,29 +303,49 @@ func downloadPiece(conn net.Conn, index, totalPieceLen int) ([]byte, error) {
 			return nil, fmt.Errorf("failed to receive piece message: %v", err)
 		}
 
-		copy(buffer[i:], block)
+		if len(block) != downloadLen {
+			return nil, fmt.Errorf("unexpected block size: expected %d, got %d", downloadLen, len(block))
+		}
+
+		copy(buffer[i:i+downloadLen], block)
 	}
 
 	return buffer, nil
 }
 
-// DownloadPiece downloads the piece from the peer after sending initial messages.
-// It saves the downloaded piece into a file.
-// NOTE: DownloadPiece assumes handshake is already done.
-func DownloadPiece(conn net.Conn, index, totalPieceLen int, path string) error {
-	_, err := readBitFieldMessage(conn)
+// Attempts to download a piece from a single peer.
+func downloadPieceFromPeer(peer string, info MetaInfo, index int, path string) error {
+	conn, err := net.DialTimeout("tcp", peer, 5*time.Second)
 	if err != nil {
-		return fmt.Errorf("failed to read bitfield message: %v", err)
+		log.Printf("Failed to connect to peer %s: %v", peer, err)
+		return err
+	}
+	defer conn.Close()
+
+	_, err = HandshakePeer(conn, info)
+	if err != nil {
+		log.Printf("Handshake failed with peer %s: %v", peer, err)
+		return err
+	}
+	log.Println("Handshake successful, downloading piece...")
+
+	// **Preserving all steps before downloading the piece**
+	_, err = readBitFieldMessage(conn)
+	if err != nil {
+		log.Printf("Failed to read bitfield from peer %s: %v", peer, err)
+		return err
 	}
 
 	err = sendInterestedMessage(conn)
 	if err != nil {
-		return fmt.Errorf("failed to send interested message: %v", err)
+		log.Printf("Failed to send interested message to peer %s: %v", peer, err)
+		return err
 	}
 
 	_, err = receiveUnchokeMessage(conn)
 	if err != nil {
-		return fmt.Errorf("failed to receive unchoke message: %v", err)
+		log.Printf("Failed to receive unchoke message from peer %s: %v", peer, err)
+		return err
 	}
 
 	// Create a file to save the downloaded piece
@@ -317,9 +356,10 @@ func DownloadPiece(conn net.Conn, index, totalPieceLen int, path string) error {
 	defer file.Close()
 
 	// Download the piece
-	piece, err := downloadPiece(conn, index, totalPieceLen)
+	piece, err := downloadPiece(conn, index, info.PieceLength, info.Length)
 	if err != nil {
-		return fmt.Errorf("failed to download piece: %v", err)
+		log.Printf("Failed to download piece from peer %s: %v", peer, err)
+		return err
 	}
 
 	// Write the downloaded piece to the file
@@ -329,6 +369,26 @@ func DownloadPiece(conn net.Conn, index, totalPieceLen int, path string) error {
 	}
 
 	return nil
+}
+
+// Tries downloading a piece from multiple peers if needed.
+func DownloadPiece(info MetaInfo, index int, path string) error {
+	peers, err := GetPeers(info)
+	if err != nil {
+		return fmt.Errorf("failed to get peers: %v", err)
+	}
+
+	for _, peer := range peers {
+		log.Printf("Trying peer: %s", peer)
+		err := downloadPieceFromPeer(peer, info, index, path)
+		if err == nil {
+			log.Printf("Successfully downloaded piece %d from peer %s", index, peer)
+			return nil
+		}
+		log.Printf("Failed with peer %s, trying next...", peer)
+	}
+
+	return fmt.Errorf("failed to download piece %d from all peers", index)
 }
 
 func main() {
@@ -419,26 +479,9 @@ func main() {
 			log.Fatalf("Failed to parse torrent file: %v", err)
 		}
 
-		peers, err := GetPeers(metaInfo)
+		err = DownloadPiece(metaInfo, pieceIndex, resultFilePath)
 		if err != nil {
-			log.Fatalf("Failed to get peers: %v", err)
-		}
-
-		conn, err := net.Dial("tcp", peers[0])
-		if err != nil {
-			log.Fatalf("Failed to connect to peer: %v", err)
-		}
-		defer conn.Close()
-
-		_, err = HandshakePeer(conn, metaInfo)
-		if err != nil {
-			log.Fatalf("Failed to handshake peer: %v", err)
-		}
-		log.Println("Handshake successful, downloading piece...")
-
-		err = DownloadPiece(conn, pieceIndex, metaInfo.PieceLength, resultFilePath)
-		if err != nil {
-			log.Fatalf("Failed to download piece: %v", err)
+			log.Fatalf("Download failed: %v", err)
 		}
 
 	default:
