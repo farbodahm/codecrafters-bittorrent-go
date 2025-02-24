@@ -103,6 +103,20 @@ func main() {
 			log.Fatalf("Download failed: %v", err)
 		}
 
+	case "download":
+		resultFilePath := os.Args[3]
+		torrentFilePath := os.Args[4]
+
+		metaInfo, err := ParseTorrentFile(torrentFilePath)
+		if err != nil {
+			log.Fatalf("Failed to parse torrent file: %v", err)
+		}
+
+		err = DownloadFile(metaInfo, resultFilePath)
+		if err != nil {
+			log.Fatalf("Download failed: %v", err)
+		}
+
 	default:
 		// Handle unknown commands
 		log.Fatalf("Unknown command: %s", command)

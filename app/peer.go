@@ -22,6 +22,25 @@ type PeerMessage struct {
 	Payload []byte
 }
 
+// DownloadFile downloads the whole file the torrent file; And saves each piece in a temp file.
+// Then merge all the pieces to create the final file.
+func DownloadFile(info MetaInfo, path string) error {
+	for i := range info.Pieces {
+		// Download the piece
+		err := DownloadPiece(info, i, fmt.Sprintf("%s_temp_%d", path, i))
+		if err != nil {
+			return fmt.Errorf("failed to download piece %d: %v", i, err)
+		}
+	}
+
+	err := mergePieces(len(info.Pieces), path)
+	if err != nil {
+		return fmt.Errorf("failed to merge pieces: %v", err)
+	}
+
+	return nil
+}
+
 // Tries downloading a piece from multiple peers if needed.
 func DownloadPiece(info MetaInfo, index int, path string) error {
 	peers, err := GetPeers(info)
@@ -112,6 +131,32 @@ func HandshakePeer(conn net.Conn, info MetaInfo) ([]byte, error) {
 	peerID := resp[48:]
 
 	return peerID, nil
+}
+
+// mergePieces merges all the pieces to create the final file.
+func mergePieces(numOfPieces int, path string) error {
+	// Final file
+	file, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %v", err)
+	}
+	defer file.Close()
+
+	// Merge all the pieces
+	for i := range numOfPieces {
+		pieceFile, err := os.Open(fmt.Sprintf("%s_temp_%d", path, i))
+		if err != nil {
+			return fmt.Errorf("failed to open piece file: %v", err)
+		}
+		defer pieceFile.Close()
+
+		_, err = io.Copy(file, pieceFile)
+		if err != nil {
+			return fmt.Errorf("failed to copy piece to file: %v", err)
+		}
+	}
+
+	return nil
 }
 
 // readExactBytes reads exactly 'size' bytes from the connection.
