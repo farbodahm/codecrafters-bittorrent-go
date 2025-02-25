@@ -25,11 +25,24 @@ type PeerMessage struct {
 // DownloadFile downloads the whole file the torrent file; And saves each piece in a temp file.
 // Then merge all the pieces to create the final file.
 func DownloadFile(info MetaInfo, path string) error {
+	errors := make(chan error)
 	for i := range info.Pieces {
 		// Download the piece
-		err := DownloadPiece(info, i, fmt.Sprintf("%s_temp_%d", path, i))
+		go func(i int) {
+			errors <- DownloadPiece(info, i, fmt.Sprintf("%s_temp_%d", path, i))
+		}(i)
+	}
+
+	// Wait for all the pieces to download
+	finished := 0
+	for err := range errors {
 		if err != nil {
-			return fmt.Errorf("failed to download piece %d: %v", i, err)
+			return fmt.Errorf("failed to download piece: %v", err)
+		}
+		finished++
+		if finished == len(info.Pieces) {
+			log.Println("All pieces downloaded successfully")
+			close(errors)
 		}
 	}
 
@@ -301,8 +314,6 @@ func downloadPiece(conn net.Conn, index, pieceLength, totalFileSize int) ([]byte
 		// Determine block size dynamically
 		remainingSize := totalPieceLen - i
 		downloadLen := min(PieceLength, remainingSize)
-
-		log.Printf("Requesting block - Start: %d, Length: %d, Remaining: %d\n", i, downloadLen, remainingSize)
 
 		err := sendRequestMessage(conn, index, i, downloadLen)
 		if err != nil {
