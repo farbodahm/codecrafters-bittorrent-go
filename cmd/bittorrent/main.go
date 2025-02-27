@@ -117,6 +117,16 @@ func main() {
 			log.Fatalf("Download failed: %v", err)
 		}
 
+	case "magnet_parse":
+		magnetLink := os.Args[2]
+		metaInfo, err := ParseMagnetLink(magnetLink)
+		if err != nil {
+			log.Fatalf("Failed to parse magnet link: %v", err)
+		}
+
+		fmt.Println("Tracker URL:", metaInfo.TrackerUrl)
+		fmt.Println("Info Hash:", string(metaInfo.InfoHash))
+
 	default:
 		// Handle unknown commands
 		log.Fatalf("Unknown command: %s", command)
