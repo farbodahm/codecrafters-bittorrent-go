@@ -125,7 +125,31 @@ func main() {
 		}
 
 		fmt.Println("Tracker URL:", metaInfo.TrackerUrl)
-		fmt.Println("Info Hash:", string(metaInfo.InfoHash))
+		fmt.Printf("Info Hash: %x\n", metaInfo.InfoHash)
+
+	case "magnet_handshake":
+		magnetLink := os.Args[2]
+		metaInfo, err := ParseMagnetLink(magnetLink)
+		if err != nil {
+			log.Fatalf("Failed to parse magnet link: %v", err)
+		}
+
+		peers, err := GetMagnetPeers(metaInfo)
+		if err != nil {
+			log.Fatalf("Failed to get peers: %v", err)
+		}
+
+		conn, err := net.Dial("tcp", peers[0])
+		if err != nil {
+			log.Fatalf("Failed to connect to peer: %v", err)
+		}
+		defer conn.Close()
+
+		peerId, err := HandshakeMagnetPeer(conn, metaInfo)
+		if err != nil {
+			log.Fatalf("Failed to handshake peer: %v", err)
+		}
+		fmt.Printf("Peer ID: %x\n", peerId)
 
 	default:
 		// Handle unknown commands
